@@ -1,5 +1,8 @@
 # AbetAgent
 
+![CI](https://github.com/coding4vinayak/aw-abetagent/actions/workflows/ci.yml/badge.svg)
+
+
 Autonomous AI agents for revenue and service. Agents that finish the job,
 not just chat about it — $99/month.
 
