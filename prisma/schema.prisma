@@ -1,0 +1,324 @@
+// AbetAgent - Autonomous AI agents for revenue and service.
+//
+// SQLite by default so the product runs with zero infrastructure.
+// For Postgres: change `provider` to "postgresql" and point DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agents        Agent[]
+  tools         Tool[]
+  knowledgeBases KnowledgeBase[]
+  runs          Run[]
+  subscription  Subscription?
+  memberships Membership[]
+  sessions   Session[]
+  invites     Invite[]
+  apiKeys     ApiKey[]
+}
+
+/// Billing: one active subscription per workspace, managed by Stripe.
+model Subscription {
+  id                 String   @id @default(cuid())
+  workspaceId        String   @unique
+  stripeCustomerId   String   @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId      String?
+  stripeCurrentPeriodEnd DateTime?
+  status             String   @default("incomplete") // incomplete | trialing | active | past_due | canceled | unpaid
+  cancelAtPeriodEnd  Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+}
+
+model Agent {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  name         String
+  description  String?
+  // Model identifier for an OpenAI-compatible endpoint, e.g. "gpt-4o-mini".
+  // Empty means heuristic-only (no LLM calls, ever).
+  model        String   @default("")
+  systemPrompt String
+  // Ordered tool names this agent may call, e.g. ["kb_search", "http_fetch"].
+  tools        Json
+  // Safety rails: maxSteps, escalateOn (substring list), blockedTopics.
+  guardrails   Json?
+  status       String   @default("ACTIVE") // ACTIVE | PAUSED | ARCHIVED
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      Run[]
+
+  @@index([workspaceId, status])
+}
+
+/// A named tool an agent may call. Either builtin (handled in-process) or
+/// webhook (POSTed to a URL with a signed body).
+model Tool {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String
+  // BUILTIN | WEBHOOK
+  kind        String
+  // JSON Schema for the arguments object.
+  schema      Json?
+  // For WEBHOOK: { url, secret }. For BUILTIN: { handler }.
+  config      Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, isActive])
+}
+
+model KnowledgeBase {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@index([workspaceId])
+}
+
+model Document {
+  id              String   @id @default(cuid())
+  knowledgeBaseId String
+  title           String
+  source          String?  // URL, file name, or "manual"
+  createdAt       DateTime @default(now())
+
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  chunks        Chunk[]
+
+  @@index([knowledgeBaseId])
+}
+
+model Chunk {
+  id         String   @id @default(cuid())
+  documentId String
+  position   Int
+  text       String
+  // Lowercased keyword tokens, JSON array — the heuristic retriever's index.
+  tokens     Json
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, position])
+}
+
+/// One autonomous execution: input in, terminal step out.
+model Run {
+  id          String   @id @default(cuid())
+  workspaceId String
+  agentId     String
+  // Who/what started this run: channel + external id, e.g. WEBFORM contact.
+  subject     String?
+  input       String
+  status      String   @default("QUEUED") // QUEUED | RUNNING | COMPLETED | ESCALATED | FAILED
+  output      String?
+  // Steps taken; error message when FAILED.
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent     Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  steps     Step[]
+
+  @@index([workspaceId, status])
+  @@index([agentId, status])
+}
+
+/// A single traceable action inside a run. The audit trail IS the product:
+// a rep (or auditor) can replay exactly what the agent saw and did.
+model Step {
+  id        String   @id @default(cuid())
+  runId     String
+  position  Int
+  // THINK | TOOL_CALL | TOOL_RESULT | REPLY | ESCALATE
+  kind      String
+  // Tool name for TOOL_CALL, event label otherwise.
+  label     String?
+  content   String
+  createdAt DateTime @default(now())
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, position])
+}
+
+/// Workspace-scoped API keys. Plaintext is shown once at mint and never stored.
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  /// sha256 of the full key. Lookup is by hash, never by plaintext.
+  hashedKey   String    @unique
+  /// First characters, safe to display: "lg_live_a1B2…".
+  prefix      String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// A person who can sign in to the browser UI. Machine access stays with
+/// `ApiKey`; this row is only for the human holding a cookie.
+model User {
+  id           String   @id @default(cuid())
+  /// Stored lowercased. The unique index is what makes signup idempotent at the
+  /// database level rather than only in application code.
+  email        String   @unique
+  name         String?
+  /// scrypt digest, never a plaintext password. See `src/lib/password.ts` for
+  /// why scrypt and not bcrypt or argon2.
+  passwordHash String
+  /// Set true by the verification link. Enforced at sign-in only when a mail
+  /// provider is configured — see `verificationEnforced()` in `lib/email.ts`.
+  emailVerified Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions               Session[]
+  emailVerificationToken EmailVerificationToken?
+  passwordResetTokens    PasswordResetToken[]
+  /// Every workspace this person can open, with the role each seat carries.
+  memberships    Membership[]
+  invitesCreated Invite[]      @relation("InviteCreatedBy")
+}
+
+/// A browser session. The cookie carries a random token and only its sha256 is
+/// stored, so a database dump yields hashes rather than working logins.
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Per-address attempt counter behind the login and signup forms, so one client
+/// cannot grind through a list of addresses.
+model AuthThrottle {
+  /// "<purpose>:<client address>", e.g. "signin:203.0.113.7".
+  key         String    @id
+  /// Events counted inside the current window: failed guesses, or accounts
+  /// created, depending on which form took the tally.
+  count       Int       @default(0)
+  windowStart DateTime  @default(now())
+  lockedUntil DateTime?
+
+  @@index([windowStart])
+}
+
+/// Single-use email-verification link. Stored hashed, like every other secret
+/// here, so a database dump yields no redeemable links.
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+/// Single-use password-reset link. Redeeming it also destroys every session the
+/// user holds, because a reset exists to evict whoever prompted it.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+/// One seat in a workspace. The only membership source of truth — see the
+/// migration note in TEST-REPORT: rows were copied from the old implicit join
+/// table, crediting OWNER to whoever was already there.
+model Membership {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  /// OWNER | ADMIN | MEMBER. Signup creates OWNER; invites can only grant ADMIN
+  /// or MEMBER, so accepting a link can never seize a workspace.
+  role        String   @default("OWNER")
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+/// A single-use link addressed to one email. Stored hashed, like every other
+/// secret here, so a dump yields no redeemable invitations.
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  /// Lowercased. An account that is not this address cannot redeem it.
+  email       String
+  /// ADMIN | MEMBER. OWNER is never issuable.
+  role        String
+  tokenHash   String    @unique
+  createdById String
+  /// Links age out. An invitation left in a chat window or a deleted browser is
+  /// a standing door, and nothing withdraws it when the sender changes their mind.
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([email])
+}
