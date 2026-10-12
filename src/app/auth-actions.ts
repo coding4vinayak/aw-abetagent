@@ -16,6 +16,7 @@ import {
   passwordResetUrl,
   recordPasswordResetAttempt,
   verificationUrl,
+  appBaseUrl,
   VERIFICATION_TOKEN_EXPIRY_HOURS,
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
 } from "@/lib/tokens";
@@ -23,6 +24,7 @@ import {
   getEmailSender,
   renderPasswordResetEmail,
   renderVerificationEmail,
+  renderWelcomeEmail,
   verificationEnforced,
   type DeliveryChannel,
 } from "@/lib/email";
@@ -192,6 +194,22 @@ export async function signUp(_previous: AuthState, formData: FormData): Promise<
     // way, and /verify-email can be re-sent from the dashboard.
     await getEmailSender()
       .send(email, `Verify your ${productName()} email`, html, plain)
+      .catch(() => undefined);
+  }
+
+  // Welcome mail runs whether or not verification is enforced — the account is
+  // real either way, and "here is your workspace" is the one message a signup
+  // owes the person who just made it. Best-effort for the same reason: an
+  // outage must not swallow a completed signup.
+  {
+    const { subject, html, text: plain } = renderWelcomeEmail({
+      product: productName(),
+      name,
+      workspaceName,
+      dashboardUrl: `${appBaseUrl()}/dashboard`,
+    });
+    await getEmailSender()
+      .send(email, subject, html, plain)
       .catch(() => undefined);
   }
 
