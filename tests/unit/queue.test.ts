@@ -46,15 +46,33 @@ const probeNamesLiveDb = /\/0$/.test(probeUrl ?? "");
 if (probeUrl && !probeNamesLiveDb) process.env.REDIS_URL = probeUrl;
 
 // --- name shape ------------------------------------------------------------
-describe("the queue name is this product's own, and constructible", () => {
+// Every exported `*_QUEUE` name, not just the first one: a second queue added to
+// this module is a second Redis keyspace, and the two failures that matter — a
+// name another product already holds, a colon bullmq refuses at construction —
+// are properties of each name, not of the oldest one.
+describe("every queue name is this product's own, and constructible", () => {
+  const names = [...queueModule.matchAll(/export const ([A-Z_]+_QUEUE) = "([^"]+)"/g)]
+    .map((m) => ({ const: m[1], name: m[2] }));
+
+  it("is declared where this test can read it", () => {
+    assert.ok(names.length > 0, "the module declares at least one queue name");
+  });
+
   it("is prefixed with the product id", () => {
-    assert.match(queueModule, /export const RUNS_QUEUE = "abetagent-[a-z0-9-]+";/);
+    for (const entry of names) {
+      assert.match(entry.name, /^abetagent-[a-z0-9-]+$/, `${entry.const} is not this product's own keyspace`);
+    }
   });
 
   it("contains no colon, because bullmq throws on one at construction", () => {
-    const name = /export const RUNS_QUEUE = "([^"]+)"/.exec(queueModule)?.[1];
-    assert.ok(name, "the queue name is where this test can read it");
-    assert.ok(!name.includes(":"), `bullmq rejects "${name}" outright (queue-base.js:35)`);
+    for (const entry of names) {
+      assert.ok(!entry.name.includes(":"), `bullmq rejects "${entry.name}" outright (queue-base.js:35)`);
+    }
+  });
+
+  it("is distinct per queue, because two names mean one keyspace", () => {
+    const seen = names.map((entry) => entry.name);
+    assert.equal(new Set(seen).size, seen.length, `duplicate queue name in ${seen.join(", ")}`);
   });
 });
 
@@ -110,7 +128,17 @@ describe("the queue declares retention at construction", () => {
 describe("shutdownWorkers closes what startWorkers started", () => {
   it("keeps every Worker, so the drain has a reference to close", () => {
     assert.match(queueModule, /const workers: Worker\[\] = \[\];/);
-    assert.match(queueModule, /workers\.push\(worker\);/);
+    // Match on the names, not on one fixed count: a second Worker added without
+    // registering it is exactly the defect this file was written for, and an
+    // assertion spelling out the first one alone would still pass.
+    const constructed = [...queueModule.matchAll(/const (\w+) = new Worker\(/g)].map((m) => m[1]);
+    assert.ok(constructed.length > 0, "startWorkers constructs at least one Worker");
+    const push = /workers\.push\(([^)]*)\);/.exec(queueModule);
+    assert.ok(push, "startWorkers registers its Workers with workers.push");
+    const pushed = push[1].split(",").map((name) => name.trim());
+    for (const name of constructed) {
+      assert.ok(pushed.includes(name), `${name} is constructed but never pushed, so shutdown cannot close it`);
+    }
   });
 
   it("lets in-flight Redis setup land before closing anything", () => {

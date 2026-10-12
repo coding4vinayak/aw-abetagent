@@ -1,5 +1,8 @@
 import { Queue, Worker, Job } from "bullmq";
 import IORedis from "ioredis";
+// Type-only, so this does not close a cycle at runtime: `billing-jobs` imports
+// this module's queue, and the worker below needs its job shape.
+import type { TrialNudgeData } from "./billing-jobs";
 
 const connection = new IORedis(process.env.REDIS_URL || "redis://localhost:6379", {
   maxRetriesPerRequest: null,
@@ -66,6 +69,15 @@ export async function enqueue<T extends object>(
 export const RUNS_QUEUE = "abetagent-runs";
 
 /**
+ * Billing warnings — the trial nudges — get their own name for the reason above:
+ * a queue name is the Redis keyspace, so sharing `abetagent-runs` would let the
+ * run worker take a `{ workspaceId, offsetDays }` payload and call
+ * `runAgentRun(undefined)`. A nudge is also a different shape of work: one email
+ * per job, and it may sit in Redis for a week before anything runs it.
+ */
+export const BILLING_QUEUE = "abetagent-billing";
+
+/**
  * Built on first touch, not at import, because `new Queue()` is not inert. Handed a
  * lazy-connect client it opens that connection on the next tick and writes
  * `bull:<name>:meta` before anything calls `add()` — measured on a scratch db against
@@ -78,7 +90,7 @@ export const RUNS_QUEUE = "abetagent-runs";
  * The name stays as the first argument of the Queue construction, which is where
  * `shared/check-queues.sh` reads it: memoising does not move the asserted fact.
  */
-const built: { runs?: Queue } = {};
+const built: { runs?: Queue; billing?: Queue } = {};
 
 /** Every Worker this process started, so shutdownWorkers() can actually close them. */
 const workers: Worker[] = [];
@@ -105,17 +117,27 @@ export const queues = {
   get runs(): Queue {
     return (built.runs ??= new Queue(RUNS_QUEUE, { connection, defaultJobOptions: JOB_RETENTION }));
   },
+  get billing(): Queue {
+    return (built.billing ??= new Queue(BILLING_QUEUE, { connection, defaultJobOptions: JOB_RETENTION }));
+  },
 };
 
 export async function startWorkers() {
   const { runAgentRun } = await import("./runner");
+  const { runTrialNudge } = await import("./billing-jobs");
 
   const worker = new Worker(RUNS_QUEUE, async (job: Job) => {
     const { runId } = job.data as { runId: string };
     await runAgentRun(runId);
   }, { connection, concurrency: 5 });
 
-  workers.push(worker);
+  // Concurrency 1: a nudge is one email to one owner, and the mail transport is
+  // the slow part. Nothing about correctness changes with more, so keep it low.
+  const billingWorker = new Worker(BILLING_QUEUE, async (job: Job) => {
+    await runTrialNudge(job as Job<TrialNudgeData>);
+  }, { connection, concurrency: 1 });
+
+  workers.push(worker, billingWorker);
   console.log("AbetAgent workers started");
 }
 

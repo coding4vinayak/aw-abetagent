@@ -201,6 +201,8 @@ POST /api/billing/webhook
 
 `checkout` takes `{ priceId: "FLAT_MONTHLY" | "FLAT_ANNUAL", returnUrl }` and returns `{ url }` for the Stripe-hosted page. The webhook verifies the Stripe signature and syncs `checkout.session.completed`, `customer.subscription.*`, and `invoice.payment_failed` into the `Subscription` row. Setup: create the two prices in Stripe, set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_FLAT_MONTHLY`, `STRIPE_PRICE_FLAT_ANNUAL`, forward webhooks with `stripe listen --forward-to localhost:3400/api/billing/webhook`. Signature checks are unit-tested offline in `tests/unit/billing.test.ts`.
 
+Every paid plan opens with a 14-day card-up trial (`trial_period_days` on the subscription), so the first invoice is dated two weeks out and the dashboard banner counts the days down to it. Two warnings are armed off the webhook that confirms the trial — delayed BullMQ jobs on `abetagent-billing`, at three days left and one day left — and each one re-reads the `Subscription` row before it mails: a workspace that already converted, cancelled, or had its trial moved gets silence rather than a wrong date. Arming is best-effort in the same shape as every other mail here, so with Redis down the webhook still answers 200 and no nudge is sent; `REDIS_URL` has to point somewhere real for these to arrive. The job id names the trial period, so a Stripe webhook retry cannot double-send.
+
 ## Putting it somewhere
 
 ```bash
@@ -212,7 +214,7 @@ npm start
 
 Point the load balancer at `GET /api/health` (200 = serving, 503 = DB down).
 Queue workers (`src/lib/queue.ts`, BullMQ + Redis) drain the `abetagent-runs`
-queue. The product is in the name because a BullMQ queue name *is* its Redis key
+and `abetagent-billing` queues. The product is in the name because a BullMQ queue name *is* its Redis key
 prefix: while this and abetflow's were both `runs`, the two apps' workers took
 each other's jobs. The separator is a hyphen because bullmq rejects a `:` in a
 queue name outright. `sync=true` executes inline with no Redis at all. The Queue is
