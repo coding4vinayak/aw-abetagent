@@ -233,7 +233,7 @@ export function renderWelcomeEmail(data: {
     ...layout(
       data.product,
       `Your ${data.workspaceName} workspace is ready`,
-      `${greeting} your ${data.product} workspace is set up. Sign in to see it, and the dashboard will point you at the first thing worth doing. LLM costs are yours — bring any OpenAI-compatible key, or run heuristic-only for free.`,
+      `${greeting} your ${data.product} workspace is set up. Sign in and the dashboard will point you at the first thing worth doing. When you are ready, every paid plan starts with a 14-day free trial — no charge before day 14, cancel any time from the portal. LLM costs are yours: bring any OpenAI-compatible key, or run heuristic-only for free.`,
       "Open your dashboard",
       data.dashboardUrl,
     ),
