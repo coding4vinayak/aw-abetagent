@@ -2,7 +2,7 @@ import { Queue, Worker, Job } from "bullmq";
 import IORedis from "ioredis";
 // Type-only, so this does not close a cycle at runtime: `billing-jobs` imports
 // this module's queue, and the worker below needs its job shape.
-import type { TrialNudgeData } from "./billing-jobs";
+import type { CancellationData, TrialNudgeData } from "./billing-jobs";
 
 const connection = new IORedis(process.env.REDIS_URL || "redis://localhost:6379", {
   maxRetriesPerRequest: null,
@@ -69,11 +69,13 @@ export async function enqueue<T extends object>(
 export const RUNS_QUEUE = "abetagent-runs";
 
 /**
- * Billing warnings — the trial nudges — get their own name for the reason above:
- * a queue name is the Redis keyspace, so sharing `abetagent-runs` would let the
- * run worker take a `{ workspaceId, offsetDays }` payload and call
- * `runAgentRun(undefined)`. A nudge is also a different shape of work: one email
- * per job, and it may sit in Redis for a week before anything runs it.
+ * Billing mail — the trial nudges and the cancellation pair — gets its own name
+ * for the reason above: a queue name is the Redis keyspace, so sharing
+ * `abetagent-runs` would let the run worker take a `{ workspaceId, offsetDays }`
+ * payload and call `runAgentRun(undefined)`. It is also a different shape of
+ * work: one email per job, and it may sit in Redis for a week before anything
+ * runs it. `runBillingJob` dispatches on the job name, so the keyspace holds
+ * every mail kind and the worker that drains it is named once.
  */
 export const BILLING_QUEUE = "abetagent-billing";
 
@@ -124,17 +126,18 @@ export const queues = {
 
 export async function startWorkers() {
   const { runAgentRun } = await import("./runner");
-  const { runTrialNudge } = await import("./billing-jobs");
+  const { runBillingJob } = await import("./billing-jobs");
 
   const worker = new Worker(RUNS_QUEUE, async (job: Job) => {
     const { runId } = job.data as { runId: string };
     await runAgentRun(runId);
   }, { connection, concurrency: 5 });
 
-  // Concurrency 1: a nudge is one email to one owner, and the mail transport is
-  // the slow part. Nothing about correctness changes with more, so keep it low.
+  // Concurrency 1: a billing mail is one message to one owner, and the mail
+  // transport is the slow part. Nothing about correctness changes with more, so
+  // keep it low.
   const billingWorker = new Worker(BILLING_QUEUE, async (job: Job) => {
-    await runTrialNudge(job as Job<TrialNudgeData>);
+    await runBillingJob(job as Job<TrialNudgeData | CancellationData>);
   }, { connection, concurrency: 1 });
 
   workers.push(worker, billingWorker);
