@@ -185,13 +185,59 @@ GET    /api/runs/{id}                      # full trace
 DELETE /api/runs/{id}
 GET    /api/tools?workspaceId=             # registry + builtins
 POST   /api/tools                          # webhook tools only (builtins need no row)
+GET    /api/webhooks?workspaceId=          # outbound subscriptions (secrets previewed)
+POST   /api/webhooks                       # subscribe; returns the signing secret once
+GET    /api/webhooks/{id}                  # one subscription
+PATCH  /api/webhooks/{id}                  # move the URL, re-filter events, silence
+DELETE /api/webhooks/{id}
 GET    /api/knowledge?workspaceId=         # bases, or ?q= to search
 POST   /api/knowledge                      # create a base, or ingest a document
 ```
 
 Builtins: `kb_search` (your documents, cited), `http_fetch` (10s timeout,
 4KB cap, http(s) only), `escalate_to_human`. Webhook tools POST signed
-JSON (`timestamp.body` HMAC) with a 10s timeout.
+JSON (`timestamp.body` HMAC) with a 10s timeout; every call also carries
+the generic `X-Webhook-Signature: sha256=<body HMAC>` an inbound nuCRM
+plugin webhook verifies natively.
+
+## Outbound webhooks
+
+A run has three endings and each is announced: `run.completed` (the agent
+answered), `run.escalated` (it declined to guess and handed a human the
+transcript), `run.failed` (execution itself broke). Escalation gets its own
+event because it is the moment someone needs to act.
+
+`POST /api/webhooks` takes `{ workspaceId, url, events }` and answers `201`
+with the subscription and its `secret` — the one response that carries the
+secret; list and read routes preview it instead. `events` accepts an array or a
+comma-separated string and may name only the three events above; an unknown
+name is refused with the list rather than stored, because a subscription
+filtered on a name nothing sends is the same silence as no subscription at
+all. The URL is refused at the write boundary when it points inside the
+network, and checked again at delivery time, when DNS may have moved it.
+
+Payloads carry `runId`, `agentId`, `subject`, the terminal `status`, `output`
+(the reply on completion), `error` (the message on failure), `completedAt` and
+`durationMs`; `GET /api/runs/{id}` holds the full step trace when a receiver
+wants the detail. `PATCH` can move the URL, re-filter `events`, or silence a
+subscription with `isActive: false` without deleting it.
+
+Each delivery is one JSON body `{ id, event, timestamp, data }`, signed with
+HMAC-SHA256 over the raw body using that subscription's secret. The digest
+rides under two headers carrying the same hex: `X-Abetagent-Signature: <hex>`
+(this product's spelling) and `X-Webhook-Signature: sha256=<hex>` — the
+generic spelling an inbound nuCRM plugin webhook
+(`/api/tenant/plugins/webhook/{id}`) verifies out of the box, so a nuCRM
+tenant subscribes here with no adapter in between. The same generic header
+also rides every webhook tool call, whose original signature stays the
+timestamped `X-Abetagent-Signature`.
+
+Delivery is one attempt, inline, best-effort and never throwing: an endpoint
+that is down is logged and skipped, and never turns a committed run into a
+failure. `tests/unit/webhook-dispatch.test.ts` pins the wiring — an event
+declared without an emitter, an emitter that moved ahead of the row that makes
+it true, a delivery that lost its egress check, or a tool call that dropped
+the generic signature all fail the suite.
 
 ## Billing
 

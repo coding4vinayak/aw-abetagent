@@ -126,3 +126,22 @@ export const RUN_CREATE = {
   input: { kind: "text", required: true, max: 20000 },
   subject: { kind: "text", nullable: true, max: 200 },
 } satisfies Schema;
+
+/**
+ * Outbound webhook subscriptions. `url` is a caller-named address this server
+ * will POST to whenever a matching event fires, so it is checked twice and for
+ * different things: the routes refuse an internal destination as a field
+ * problem here, and `egress.ts` refuses the address again at delivery time,
+ * when DNS may have moved it. `events` is checked by `eventNames` on the two
+ * routes rather than here — the column is a comma string and the accepted
+ * spellings are "array or comma string", a distinction a scalar table cannot
+ * see. `isActive` is the boolean column those rows can be silenced with.
+ */
+export const WEBHOOK_CREATE = {
+  url: { kind: "text", required: true, format: "url", max: 2000 },
+} satisfies Schema;
+
+export const WEBHOOK_PATCH = {
+  url: { kind: "text", format: "url", max: 2000 },
+  isActive: { kind: "bool" },
+} satisfies Schema;

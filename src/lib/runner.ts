@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { searchKnowledge } from "./knowledge";
 import { callTool } from "./tools";
+import { triggerWebhooks, type WebhookEvent } from "./webhooks";
 
 const DEFAULT_MAX_STEPS = 8;
 
@@ -22,6 +23,41 @@ export function readGuardrails(raw: unknown): Guardrails {
 async function addStep(runId: string, position: number, kind: string, content: string, label?: string) {
   return prisma.step.create({
     data: { runId, position, kind, content, ...(label != null ? { label } : {}) },
+  });
+}
+
+/** Terminal status → the event that announces it. Keys are the status column's values. */
+const TERMINAL_EVENT = {
+  COMPLETED: "run.completed",
+  ESCALATED: "run.escalated",
+  FAILED: "run.failed",
+} as const satisfies Record<string, WebhookEvent>;
+
+/**
+ * Announce a run's terminal moment to every subscription that names it.
+ *
+ * Called after the row that makes the state true is committed, fire-and-forget
+ * on purpose: `triggerWebhooks` never throws, and a dead receiver must not
+ * fail a finished run — or hold the worker (or a sync caller) open while its
+ * endpoint is tried. The payload is the announcement's job; the detail behind
+ * it stays `GET /api/runs/{id}`.
+ */
+function announce(
+  run: { id: string; workspaceId: string; agentId: string; subject: string | null },
+  status: keyof typeof TERMINAL_EVENT,
+  detail: { output: string | null; error?: string | null },
+  completedAt: Date,
+  startedAt: Date,
+): void {
+  void triggerWebhooks(run.workspaceId, TERMINAL_EVENT[status], {
+    runId: run.id,
+    agentId: run.agentId,
+    subject: run.subject,
+    status,
+    output: detail.output,
+    error: detail.error ?? null,
+    completedAt,
+    durationMs: completedAt.getTime() - startedAt.getTime(),
   });
 }
 
@@ -86,7 +122,8 @@ export async function runAgentRun(runId: string): Promise<void> {
   });
   if (!run || run.status === "COMPLETED" || run.status === "ESCALATED" || run.status === "FAILED") return;
 
-  await prisma.run.update({ where: { id: runId }, data: { status: "RUNNING", startedAt: new Date() } });
+  const startedAt = new Date();
+  await prisma.run.update({ where: { id: runId }, data: { status: "RUNNING", startedAt } });
 
   try {
     const agent = run.agent;
@@ -102,10 +139,12 @@ export async function runAgentRun(runId: string): Promise<void> {
     if (escalated) {
       await addStep(runId, position++, "THINK", "Customer asked for a human (or to cancel). Escalating without guessing.", "escalation-rule");
       await addStep(runId, position++, "ESCALATE", "Handed to a human with the full transcript attached.", "handoff");
+      const completedAt = new Date();
       await prisma.run.update({
         where: { id: runId },
-        data: { status: "ESCALATED", output: "Escalated to a human.", completedAt: new Date() },
+        data: { status: "ESCALATED", output: "Escalated to a human.", completedAt },
       });
+      announce(run, "ESCALATED", { output: "Escalated to a human." }, completedAt, startedAt);
       return;
     }
 
@@ -132,26 +171,29 @@ export async function runAgentRun(runId: string): Promise<void> {
 
     if (position + 1 > maxSteps) {
       await addStep(runId, position++, "ESCALATE", "Step budget exhausted before a confident answer. Handing to a human.", "step-budget");
+      const completedAt = new Date();
       await prisma.run.update({
         where: { id: runId },
-        data: { status: "ESCALATED", output: "Step budget exhausted.", completedAt: new Date() },
+        data: { status: "ESCALATED", output: "Step budget exhausted.", completedAt },
       });
+      announce(run, "ESCALATED", { output: "Step budget exhausted." }, completedAt, startedAt);
       return;
     }
 
     await addStep(runId, position++, "REPLY", reply, "final");
+    const completedAt = new Date();
     await prisma.run.update({
       where: { id: runId },
-      data: { status: "COMPLETED", output: reply, completedAt: new Date() },
+      data: { status: "COMPLETED", output: reply, completedAt },
     });
+    announce(run, "COMPLETED", { output: reply }, completedAt, startedAt);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    const completedAt = new Date();
     await prisma.run.update({
       where: { id: runId },
-      data: {
-        status: "FAILED",
-        error: error instanceof Error ? error.message : "Unknown error",
-        completedAt: new Date(),
-      },
+      data: { status: "FAILED", error: message, completedAt },
     });
+    announce(run, "FAILED", { output: null, error: message }, completedAt, startedAt);
   }
 }
