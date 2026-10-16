@@ -97,6 +97,14 @@ export async function callTool(
             .update(`${timestamp}.${body}`)
             .digest("hex");
           headers["x-abetagent-timestamp"] = timestamp;
+          // The same secret, the generic spelling: body-only HMAC hex with a
+          // `sha256=` prefix — what an inbound nuCRM plugin webhook verifies
+          // natively. Its freshness check only engages when a header named
+          // `x-webhook-timestamp` is present, and that header is deliberately
+          // absent: this is a request-response tool call, not a fire-and-forget
+          // delivery, and the timestamped pair above already pins time for the
+          // receivers that want it.
+          headers["x-webhook-signature"] = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
         }
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 10000);

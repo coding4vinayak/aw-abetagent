@@ -24,6 +24,7 @@ model Workspace {
   tools         Tool[]
   knowledgeBases KnowledgeBase[]
   runs          Run[]
+  webhooks      Webhook[]
   subscription  Subscription?
   memberships Membership[]
   sessions   Session[]
@@ -178,6 +179,26 @@ model Step {
   run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId, position])
+}
+
+/// An outbound webhook subscription: where this workspace hears about its runs.
+/// `events` is a comma string of names from `WEBHOOK_EVENTS` — nothing else is
+/// stored, so a name nothing emits is refused at the write boundary rather than
+/// living here as silence. `secret` signs every delivery (HMAC-SHA256 hex over
+/// the raw body); it is returned once, by the response that creates the row.
+model Webhook {
+  id          String   @id @default(cuid())
+  workspaceId String
+  url         String
+  events      String
+  secret      String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, isActive])
 }
 
 /// Workspace-scoped API keys. Plaintext is shown once at mint and never stored.
