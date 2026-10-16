@@ -15,7 +15,9 @@ escalates to a human instead of bluffing when the answer is not there.
 
 ```bash
 npm install
-npx prisma migrate dev      # creates the SQLite database
+cp .env.example .env        # DATABASE_URL points at the compose Postgres
+docker compose up -d        # local Postgres 16
+npx prisma migrate deploy   # applies the committed migrations
 npm run db:seed             # demo workspace, handbook KB, support agent, sample run
 npm run dev                 # http://localhost:3400
 ```
