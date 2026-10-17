@@ -37,19 +37,35 @@ test("every terminal status maps to a declared event, one announce per ending", 
   }
   assert.equal(
     (runner.match(/announce\(run, "/g) ?? []).length,
-    4,
-    "two escalation paths, the completion path and the catch",
+    5,
+    "three escalation paths (phrase rule, no-confidence, step budget), the completion path and the catch",
   );
 });
 
 test("every announce sits after the write that makes the state true", () => {
   const calls = [...runner.matchAll(/announce\(run, "/g)].map((m) => m.index ?? 0);
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 5);
   for (const at of calls) {
     const write = runner.lastIndexOf("prisma.run.update(", at);
     assert.ok(write !== -1, "an announcement with no row behind it");
     assert.ok(at - write < 400, "the terminal row is committed before the event about it");
   }
+});
+
+test("the no-confidence refusal is a real escalation, not a completed promise", () => {
+  // The reply text says a teammate will pick this up; if the run ended
+  // COMPLETED under run.completed, nothing would ever notify that teammate.
+  assert.match(runner, /if \(hits\.length === 0\)/);
+  assert.match(runner, /"no-confidence"/);
+  assert.match(
+    runner,
+    /data: \{ status: "ESCALATED", output: refusal, completedAt \}/,
+    "the refusal row is written ESCALATED with the customer-facing text preserved",
+  );
+  assert.ok(
+    runner.indexOf('announce(run, "ESCALATED", { output: refusal }') > runner.indexOf("if (hits.length === 0)"),
+    "the escalation event is announced from inside the no-confidence branch",
+  );
 });
 
 test("the dispatcher signs the body once, under both spellings", () => {
