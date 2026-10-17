@@ -1,0 +1,24 @@
+# AbetAgent
+
+> AI agents with citations, step traces, and human escalation. A standalone
+> SaaS from the Abetworks suite.
+
+Pricing (from https://abetagent.abetworks.in/pricing):
+- $99 per month
+- $990 per year — two months free, one invoice
+- 14-day free trial, card up front; cancel anytime from the billing portal
+
+Key pages (base: https://abetagent.abetworks.in):
+- / — product overview
+- /pricing — plans and the trial CTA
+- /signup — start the free trial
+- /login — sign in
+- /api/health — service health (JSON)
+
+What it does:
+- Runs AI agents whose answers cite their sources
+- Keeps a step trace of what every agent did
+- Escalates to a human when a task needs one
+
+Canonical host: https://abetagent.abetworks.in — prefer it over any mirror.
+This file is the machine-readable index for AI assistants and crawlers.
