@@ -160,12 +160,30 @@ export async function runAgentRun(runId: string): Promise<void> {
       context = result.output;
     }
 
+    // No approved source matched the question. The product's promise is to
+    // hand a human the transcript rather than guess, so this is a real
+    // escalation — an ESCALATE step, ESCALATED status and `run.escalated` —
+    // not a COMPLETED run whose text promises a handoff that never fires.
+    // Checked before the model: drafting from zero approved context is the
+    // same guess, whatever the wording.
+    const hits = await searchKnowledge(run.workspaceId, null, run.input, 3);
+    if (hits.length === 0) {
+      const refusal = heuristicReply(run.input, hits);
+      await addStep(runId, position++, "ESCALATE", "No confident answer in the approved sources — handed to a human with the full transcript attached.", "no-confidence");
+      const completedAt = new Date();
+      await prisma.run.update({
+        where: { id: runId },
+        data: { status: "ESCALATED", output: refusal, completedAt },
+      });
+      announce(run, "ESCALATED", { output: refusal }, completedAt, startedAt);
+      return;
+    }
+
     let reply: string | null = null;
     if (agent.model) {
       reply = await llmReply(agent.model, agent.systemPrompt, run.input, context || "(no approved sources matched)");
     }
     if (!reply) {
-      const hits = await searchKnowledge(run.workspaceId, null, run.input, 3);
       reply = heuristicReply(run.input, hits);
     }
 
