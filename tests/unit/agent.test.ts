@@ -4,7 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { tokenize } from "../../src/lib/knowledge";
-import { readGuardrails, heuristicReply } from "../../src/lib/runner";
+import { readGuardrails, heuristicReply, isHandoffReply } from "../../src/lib/runner";
 import { callTool, BUILTIN_TOOLS } from "../../src/lib/tools";
 import { asRecord, asInputJson } from "../../src/lib/json";
 
@@ -50,6 +50,20 @@ describe("heuristicReply", () => {
     assert.match(reply, /Refunds land in 5 days/);
     assert.match(reply, /\[1\] Refunds/);
     assert.match(reply, /\[2\] Shipping/);
+  });
+});
+
+describe("isHandoffReply", () => {
+  it("accepts exactly the marker the prompt asks for", () => {
+    for (const marker of ["ESCALATE", "escalate", "Escalate.", "  ESCALATE  "]) {
+      assert.equal(isHandoffReply(marker), true, JSON.stringify(marker));
+    }
+  });
+
+  it("is strict: prose that talks about escalating is a draft, not a handoff", () => {
+    for (const prose of ["ESCALATED", "I will escalate", "Please ESCALATE this", "ESCALATE: I cannot answer", ""]) {
+      assert.equal(isHandoffReply(prose), false, JSON.stringify(prose));
+    }
   });
 });
 

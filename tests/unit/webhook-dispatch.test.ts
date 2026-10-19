@@ -37,14 +37,14 @@ test("every terminal status maps to a declared event, one announce per ending", 
   }
   assert.equal(
     (runner.match(/announce\(run, "/g) ?? []).length,
-    5,
-    "three escalation paths (phrase rule, no-confidence, step budget), the completion path and the catch",
+    6,
+    "four escalation paths (phrase rule, no-confidence / no-sources, model handoff, step budget), the completion path and the catch",
   );
 });
 
 test("every announce sits after the write that makes the state true", () => {
   const calls = [...runner.matchAll(/announce\(run, "/g)].map((m) => m.index ?? 0);
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 6);
   for (const at of calls) {
     const write = runner.lastIndexOf("prisma.run.update(", at);
     assert.ok(write !== -1, "an announcement with no row behind it");
@@ -66,6 +66,29 @@ test("the no-confidence refusal is a real escalation, not a completed promise", 
     runner.indexOf('announce(run, "ESCALATED", { output: refusal }') > runner.indexOf("if (hits.length === 0)"),
     "the escalation event is announced from inside the no-confidence branch",
   );
+});
+
+test("an agent without kb_search cannot cite: no retrieval step, no reply", () => {
+  assert.match(runner, /const canSearch = allowedTools\.includes\("kb_search"\)/);
+  assert.match(runner, /"no-sources"/);
+  assert.match(
+    runner,
+    /const hits = canSearch \? await searchKnowledge\(run\.workspaceId, null, run\.input, 3\) : \[\]/,
+    "with no search tool there is nothing to hit and nothing to cite",
+  );
+});
+
+test("a drafting model that declines is a real escalation, not a completed promise", () => {
+  assert.match(runner, /export function isHandoffReply/);
+  assert.match(runner, /reply with exactly: ESCALATE/, "the prompt must ask for the marker the runner checks");
+  assert.match(runner, /"model-handoff"/);
+});
+
+test("the step budget is checked before the model is paid for a draft", () => {
+  const budget = runner.indexOf('"step-budget"');
+  const draft = runner.indexOf("await llmReply(");
+  assert.ok(budget !== -1 && draft !== -1, "both sites must exist");
+  assert.ok(budget < draft, "a budget-exhausted run must not have called the model");
 });
 
 test("the dispatcher signs the body once, under both spellings", () => {
