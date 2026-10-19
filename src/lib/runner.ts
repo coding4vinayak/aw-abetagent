@@ -74,6 +74,16 @@ export function heuristicReply(input: string, hits: { documentTitle: string; tex
   return `${first} (Sources: ${cites}). Happy to go deeper on any of this — just ask.`;
 }
 
+/**
+ * Exported for unit tests: whether a drafted reply is the handoff marker the
+ * prompt asks for. Strict on purpose — the model is told to answer with
+ * exactly `ESCALATE` when the approved context does not hold the answer; prose
+ * that merely talks about escalating is a draft and completes as one.
+ */
+export function isHandoffReply(text: string): boolean {
+  return /^escalate[.!]?$/i.test(text.trim());
+}
+
 async function llmReply(
   model: string,
   systemPrompt: string,
@@ -95,7 +105,7 @@ async function llmReply(
         model,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `Approved context:\n${context}\n\nCustomer message:\n${input}\n\nAnswer only from the approved context. If it is not there, say you will escalate.` },
+          { role: "user", content: `Approved context:\n${context}\n\nCustomer message:\n${input}\n\nAnswer only from the approved context. If the answer is not there, reply with exactly: ESCALATE` },
         ],
       }),
     });
@@ -135,9 +145,13 @@ export async function runAgentRun(runId: string): Promise<void> {
     const lowered = run.input.toLowerCase();
     let position = 0;
 
-    const escalated = escalateOn.some((phrase) => phrase && lowered.includes(phrase));
-    if (escalated) {
-      await addStep(runId, position++, "THINK", "Customer asked for a human (or to cancel). Escalating without guessing.", "escalation-rule");
+    // The step names the phrase that actually matched: the defaults include
+    // "agent", which fires on praise ("your agent functioned perfectly") as
+    // readily as on a request for a human — a trace claiming the customer
+    // "asked for a human (or to cancel)" was asserting something they never said.
+    const matchedPhrase = escalateOn.find((phrase) => phrase && lowered.includes(phrase));
+    if (matchedPhrase) {
+      await addStep(runId, position++, "THINK", `Guardrail phrase "${matchedPhrase}" matched — escalating without guessing.`, "escalation-rule");
       await addStep(runId, position++, "ESCALATE", "Handed to a human with the full transcript attached.", "handoff");
       const completedAt = new Date();
       await prisma.run.update({
@@ -151,25 +165,40 @@ export async function runAgentRun(runId: string): Promise<void> {
     await addStep(runId, position++, "THINK", `Task: ${run.input.slice(0, 280)}`, "understand");
 
     const allowedTools = Array.isArray(agent.tools) ? agent.tools.filter((t): t is string => typeof t === "string") : [];
+    const canSearch = allowedTools.includes("kb_search");
     const ctx = { workspaceId: run.workspaceId, knowledgeBaseId: null as string | null, runId };
     let context = "";
-    if (allowedTools.includes("kb_search")) {
+    if (canSearch) {
       await addStep(runId, position++, "TOOL_CALL", JSON.stringify({ tool: "kb_search", query: run.input.slice(0, 200) }), "kb_search");
       const result = await callTool("kb_search", { query: run.input, limit: 3 }, ctx, allowedTools);
       await addStep(runId, position++, "TOOL_RESULT", result.output.slice(0, 2000), "kb_search");
       context = result.output;
     }
 
+    // A reply may only cite what a step retrieved. Without kb_search there are
+    // no approved sources to draw on at all — before this gate, an agent whose
+    // tools excluded kb_search still answered from the workspace documents,
+    // citing "(Sources: [1] …)" while its trace held no TOOL_CALL to explain
+    // where the citation came from.
+    //
     // No approved source matched the question. The product's promise is to
     // hand a human the transcript rather than guess, so this is a real
     // escalation — an ESCALATE step, ESCALATED status and `run.escalated` —
     // not a COMPLETED run whose text promises a handoff that never fires.
     // Checked before the model: drafting from zero approved context is the
     // same guess, whatever the wording.
-    const hits = await searchKnowledge(run.workspaceId, null, run.input, 3);
+    const hits = canSearch ? await searchKnowledge(run.workspaceId, null, run.input, 3) : [];
     if (hits.length === 0) {
       const refusal = heuristicReply(run.input, hits);
-      await addStep(runId, position++, "ESCALATE", "No confident answer in the approved sources — handed to a human with the full transcript attached.", "no-confidence");
+      await addStep(
+        runId,
+        position++,
+        "ESCALATE",
+        canSearch
+          ? "No confident answer in the approved sources — handed to a human with the full transcript attached."
+          : "kb_search is not enabled for this agent, so there are no approved sources to draw on — guessing is not on the table. Handed to a human.",
+        canSearch ? "no-confidence" : "no-sources",
+      );
       const completedAt = new Date();
       await prisma.run.update({
         where: { id: runId },
@@ -179,14 +208,8 @@ export async function runAgentRun(runId: string): Promise<void> {
       return;
     }
 
-    let reply: string | null = null;
-    if (agent.model) {
-      reply = await llmReply(agent.model, agent.systemPrompt, run.input, context || "(no approved sources matched)");
-    }
-    if (!reply) {
-      reply = heuristicReply(run.input, hits);
-    }
-
+    // The budget is checked before a draft is paid for, so the step it writes
+    // says what it means: at this point no confident answer exists yet.
     if (position + 1 > maxSteps) {
       await addStep(runId, position++, "ESCALATE", "Step budget exhausted before a confident answer. Handing to a human.", "step-budget");
       const completedAt = new Date();
@@ -196,6 +219,29 @@ export async function runAgentRun(runId: string): Promise<void> {
       });
       announce(run, "ESCALATED", { output: "Step budget exhausted." }, completedAt, startedAt);
       return;
+    }
+
+    let reply: string | null = null;
+    if (agent.model) {
+      reply = await llmReply(agent.model, agent.systemPrompt, run.input, context || "(no approved sources matched)");
+    }
+    if (reply && isHandoffReply(reply)) {
+      // The drafting model declined: the prompt asks for exactly `ESCALATE`
+      // when the approved context does not hold the answer, and that must be
+      // the same handoff the heuristic's no-confidence stop fires — a reply
+      // that promises a teammate and ends COMPLETED pages nobody.
+      const refusal = heuristicReply(run.input, []);
+      await addStep(runId, position++, "ESCALATE", "The drafted answer declined to guess — handed to a human with the full transcript attached.", "model-handoff");
+      const completedAt = new Date();
+      await prisma.run.update({
+        where: { id: runId },
+        data: { status: "ESCALATED", output: refusal, completedAt },
+      });
+      announce(run, "ESCALATED", { output: refusal }, completedAt, startedAt);
+      return;
+    }
+    if (!reply) {
+      reply = heuristicReply(run.input, hits);
     }
 
     await addStep(runId, position++, "REPLY", reply, "final");

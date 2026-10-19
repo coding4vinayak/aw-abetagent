@@ -29,13 +29,18 @@ npm run dev                 # http://localhost:3400
 Heuristic-first: keyword retrieval over your own documents plus a
 deterministic replyer. Set `LLM_API_KEY` (any OpenAI-compatible endpoint)
 and a model takes over drafting with the heuristic result as fallback — a
-run never fails just because a model is down.
+run never fails just because a model is down. A drafting model declines by
+answering exactly `ESCALATE`, which fires the same handoff as the
+heuristic's no-confidence stop. A reply can only cite what its step trace
+shows being retrieved: an agent whose tools exclude `kb_search` has no
+approved sources and escalates instead of quoting them.
 
 Guardrails that mean something: `escalateOn` phrases end the run with a
-handoff instead of an answer, and a step budget stops runaway loops naming
-the node it stopped at. The step trace (`THINK → TOOL_CALL → TOOL_RESULT
-→ REPLY / ESCALATE`) is the audit trail: replay exactly what the agent saw
-and did.
+handoff instead of an answer, and the escalation step names the phrase that
+actually matched. A step budget stops runaway loops naming the node it
+stopped at — checked before any draft is paid for. The step trace (`THINK →
+TOOL_CALL → TOOL_RESULT → REPLY / ESCALATE`) is the audit trail: replay
+exactly what the agent saw and did.
 
 ## Accounts (browser)
 
