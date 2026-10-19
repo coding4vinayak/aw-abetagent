@@ -4,7 +4,7 @@ import { BuyButton } from "@/components/buy-button";
 import { ManageBillingButton } from "@/components/manage-billing";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { PRICES, SUBSCRIPTION_STATUS_ACTIVE } from "@/lib/stripe";
+import { PRICES, SUBSCRIPTION_STATUS_OPEN } from "@/lib/stripe";
 
 export const metadata: Metadata = {
   title: "Pricing — AbetAgent",
@@ -40,6 +40,9 @@ function planLine(plan: Plan): string {
   if (plan.status === "past_due") {
     return `This workspace is on the ${named} plan, and its last payment was declined. Updating the card is the fix — a new subscription would not pay the old one.`;
   }
+  if (plan.status === "unpaid") {
+    return `This workspace is on the ${named} plan, and its payments have run out. The portal is where the open invoice is settled — a new subscription would not pay the old one.`;
+  }
   return `This workspace is on the ${named} plan${renews ? `, renews ${renews}` : ""}.`;
 }
 
@@ -51,7 +54,7 @@ export default async function Page() {
         select: { status: true, stripePriceId: true, stripeCurrentPeriodEnd: true },
       })
     : null;
-  const billed = plan !== null && (SUBSCRIPTION_STATUS_ACTIVE as readonly string[]).includes(plan.status);
+  const billed = plan !== null && (SUBSCRIPTION_STATUS_OPEN as readonly string[]).includes(plan.status);
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
