@@ -19,6 +19,8 @@ What it does:
 - Runs AI agents whose answers cite their sources
 - Keeps a step trace of what every agent did
 - Escalates to a human when a task needs one
+- Owners and admins can take a workspace JSON and a streamed run-audit CSV;
+  signing secrets, API keys and invitation tokens stay behind
 
 Canonical host: https://abetagent.abetworks.in — prefer it over any mirror.
 This file is the machine-readable index for AI assistants and crawlers.
