@@ -26,6 +26,9 @@ import { AUTH_NAME, collectHandlers, unguardedWrites, writeSites, readSites, una
 // Set from a measured count, deliberately wide.
 const MIN_HANDLERS = 20;
 const MAX_HANDLERS = 50;
+// Measured: `collectHandlers()` over the fifteen route files answers 27 handlers
+// today — 11 GET, 8 POST, 4 PATCH, 4 DELETE — because a scanner that stopped
+// seeing a whole file should fail, not because 20 is the inventory.
 
 // Anything that proves the caller is who they claim to be, in the handler's own
 // body, lives in ./route-handlers.ts as AUTH_NAME — one list, shared with the

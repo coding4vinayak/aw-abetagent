@@ -7,6 +7,7 @@ import { switchWorkspaceAction } from "@/app/member-actions";
 import { createFirstKey } from "@/app/key-actions";
 import { ApiKeyOnboarding } from "@/components/api-key-onboarding";
 import { ManageBillingButton } from "@/components/manage-billing";
+import { canManageRoles } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -216,6 +217,38 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <Card label="Completed" value={completed} />
           <Card label="Escalated" value={escalated} sub="handed to a human, not a failure" />
         </div>
+
+        {session && session.workspaceId === workspace.id && canManageRoles(session.role) && (
+          <div className="mb-6 rounded-2xl bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-lg font-bold text-gray-900">Export</h2>
+              <p className="text-xs text-gray-500">Owners and admins</p>
+            </div>
+            <p className="mt-1 max-w-3xl text-sm text-gray-600">
+              The workspace JSON carries agents, prompts, tools, knowledge-base documents and
+              chunks, team, invitations and webhook destinations. The run audit is one row per
+              run with its complete step trace, streamed as CSV so a long-running workspace
+              never has to fit in memory.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/api/export"
+                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700"
+              >
+                Download workspace (JSON)
+              </a>
+              <a
+                href="/api/export/runs"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Download run audit (CSV)
+              </a>
+            </div>
+            <p className="mt-3 text-xs text-gray-500">
+              Tool and webhook signing secrets, API keys and invitation tokens are never included.
+            </p>
+          </div>
+        )}
 
         <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Agents</h2>

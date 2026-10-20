@@ -145,9 +145,30 @@ apps during the Abetworks campaign. The vendoring scripts and drift gate that en
 identity are retired. This app's copy is its own and can evolve independently.
 Full context: `abetworks-history` §8.20 and §8.44.
 
+## Export
+
+The terms say a workspace owner can export anytime, and the privacy page tells a
+departing customer to take a copy first. Two session-authenticated doors make
+that true:
+
+| Door | What it returns |
+| --- | --- |
+| `GET /api/export` | Workspace JSON: team, invitations, agents (prompt/model/tools/guardrails), tools, knowledge bases with documents and chunks, and webhook destinations. It names the run count and points at the stream. |
+| `GET /api/export/runs` | Run audit as streamed CSV: one row per run with the complete ordered step trace in `steps_json`, paged by id in batches so a long-running workspace never has to fit in memory. |
+
+Both are owner/admin only: a member gets `403`, anonymous `401`. They leave
+credentials behind — password digests, session tokens, API keys and hashes,
+invitation token hashes, tool/webhook signing secrets and Stripe ids. A webhook
+tool's config keeps its URL and drops `secret`; a webhook subscription keeps its
+destination/event list and drops its signing key. Downloads are `no-store` and
+`nosniff`; the filename is sanitised from the workspace slug. CSV text starting
+`=`, `+`, `-`, `@`, tab or CR is prefixed with an apostrophe, so a run input or
+agent name cannot become a spreadsheet formula.
+
 ## Authentication
 
-Every management route is workspace-scoped and requires an API key. A browser session is the other half — see [Accounts](#accounts-browser). `workspaceId`
+Every management route is workspace-scoped and requires an API key, except the
+session-only export and billing doors noted below. A browser session is the other half — see [Accounts](#accounts-browser). `workspaceId`
 in the query or body is **checked against the key** — a mismatch is a `403`,
 not a silent cross-tenant read.
 
@@ -174,8 +195,9 @@ protocol), and `POST /api/billing/webhook` (Stripe signature).
 
 ## API
 
-All routes below need the key from [Authentication](#authentication) —
-the snippets omit the header for width.
+All routes below need the key from [Authentication](#authentication) unless the
+comment says `session`; those take the signed-in browser session instead. The
+snippets omit the header for width.
 
 ```
 GET    /api/health                         # liveness + DB ping, no key
@@ -197,6 +219,8 @@ PATCH  /api/webhooks/{id}                  # move the URL, re-filter events, sil
 DELETE /api/webhooks/{id}
 GET    /api/knowledge?workspaceId=         # bases, or ?q= to search
 POST   /api/knowledge                      # create a base, or ingest a document
+GET    /api/export                         # workspace JSON (session; owner/admin)
+GET    /api/export/runs                    # run audit CSV, streamed (session; owner/admin)
 ```
 
 Builtins: `kb_search` (your documents, cited), `http_fetch` (10s timeout,
