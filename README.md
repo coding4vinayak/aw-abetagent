@@ -193,6 +193,40 @@ Deliberately **not** key-gated: `GET /api/health`, the provider inbound
 webhook receivers (Twilio/WhatsApp/LinkedIn — they authenticate by their own
 protocol), and `POST /api/billing/webhook` (Stripe signature).
 
+## The first run: a sample agent
+
+An empty workspace has no agent, no handbook and no answer, so the promise the
+product makes — *answers that cite their sources, with a step trace of what the
+agent did* — is invisible until someone builds it. The dashboard therefore
+offers one click:
+
+```
+POST   /api/example-data                   # load a sample agent (session or key)
+DELETE /api/example-data                   # remove the sample agent, and only it
+```
+
+An example support agent, a two-page handbook about an imaginary company, and
+one question the agent answers from it. The run is the **real runner**
+(`runAgentRun`), so the steps, the retrieval and the citation are the engine's
+own — the sample never writes an answer. The agent carries **no model**, so it
+never calls out: with no model the runner answers from the approved sources and
+escalates when they do not hold the answer, which means a first run needs no
+API key to be honest about what it is.
+
+A real run, from the sample:
+
+```
+0 THINK      Task: How long does a refund take?
+1 TOOL_CALL  {"tool":"kb_search","query":"How long does a refund take?"}
+2 TOOL_RESULT [1] Refund policy: Refunds are issued to the original payment
+              method within 5 business days of the return arriving at our warehouse.
+3 REPLY      Refunds are issued to the original payment method within 5 business
+              days of the return arriving at our warehouse. (Sources: [1] Refund policy).
+```
+
+Loading twice changes nothing, and one click removes the agent, its handbook,
+its documents and its runs — and nothing else.
+
 ## API
 
 All routes below need the key from [Authentication](#authentication) unless the
@@ -201,6 +235,8 @@ snippets omit the header for width.
 
 ```
 GET    /api/health                         # liveness + DB ping, no key
+POST   /api/example-data                   # load a sample agent (session or key)
+DELETE /api/example-data                   # remove the sample agent, and only it
 GET    /api/agents?workspaceId=            # list
 POST   /api/agents                         # create (tools validated against registry)
 GET    /api/agents/{id}                    # detail + recent runs

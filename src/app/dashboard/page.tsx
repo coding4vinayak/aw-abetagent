@@ -8,6 +8,8 @@ import { createFirstKey } from "@/app/key-actions";
 import { ApiKeyOnboarding } from "@/components/api-key-onboarding";
 import { ManageBillingButton } from "@/components/manage-billing";
 import { canManageRoles } from "@/lib/roles";
+import { ExampleAgent } from "@/components/example-agent";
+import { hasExampleAgent } from "@/lib/example-agent";
 
 export const dynamic = "force-dynamic";
 
@@ -169,7 +171,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       })
     : null;
 
-  const [agents, runs, totalRuns, completed, escalated] = await Promise.all([
+  const [agents, runs, totalRuns, completed, escalated, showExampleBanner] = await Promise.all([
     prisma.agent.findMany({
       where: { workspaceId: workspace.id },
       include: { _count: { select: { runs: true } } },
@@ -184,6 +186,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     prisma.run.count({ where: { workspaceId: workspace.id } }),
     prisma.run.count({ where: { workspaceId: workspace.id, status: "COMPLETED" } }),
     prisma.run.count({ where: { workspaceId: workspace.id, status: "ESCALATED" } }),
+    // Whether what is on screen is the sample agent, so the page can say so
+    // and offer the way out.
+    hasExampleAgent(workspace.id),
   ]);
 
   return (
@@ -251,9 +256,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         )}
 
         <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
+          {showExampleBanner && (
+            <div className="mb-4">
+              <ExampleAgent loaded />
+            </div>
+          )}
           <h2 className="text-lg font-bold text-gray-900 mb-4">Agents</h2>
           {agents.length === 0 ? (
-            <p className="text-sm text-gray-500">No agents yet. Create one via <code>POST /api/agents</code>.</p>
+            <>
+              <p className="text-sm text-gray-500">
+                No agents yet. Create one via <code>POST /api/agents</code> — or load a sample
+                agent and see what it does.
+              </p>
+              <ExampleAgent loaded={false} />
+            </>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

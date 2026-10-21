@@ -23,6 +23,8 @@ What it does:
   outside it stops and says so
 - A knowledge base the agent quotes, so an answer can be checked against the
   source it came from
+- A new workspace can load a sample agent in one click — an example handbook
+  and one question answered from it, with the steps and the citation
 - Owners and admins can take a workspace JSON and a streamed run-audit CSV;
   signing secrets, API keys and invitation tokens stay behind
 
