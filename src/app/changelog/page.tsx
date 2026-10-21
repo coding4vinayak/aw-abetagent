@@ -16,6 +16,15 @@ export default function Page() {
         <div className="mt-8 space-y-8 border-l-2 border-blue-600 pl-6">
           <div>
             <p className="text-sm text-gray-600">October 2026</p>
+            <h2 className="text-lg font-bold">v1.2.0 — See the answer cite its source</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-600">
+              <li>An empty workspace can load a sample agent in one click: an example support agent, a two-page handbook, and one question it answers from it — with the step trace and the citation, because the run is the real runner and the answer is the engine's own.</li>
+              <li>No API key is needed for that first run: the sample agent carries no model, so it answers from the approved sources and escalates when they do not hold the answer.</li>
+              <li>One click removes the sample agent, its handbook, its documents and its runs.</li>
+            </ul>
+          </div>
+          <div>
+            <p className="text-sm text-gray-600">October 2026</p>
             <h2 className="text-lg font-bold">v1.1.0 — Take the audit trail with you</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-600">
               <li>Owners and admins can download a workspace JSON with agents, prompts, tools, knowledge-base documents and chunks, team, invitations and webhook destinations.</li>
