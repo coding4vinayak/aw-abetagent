@@ -19,6 +19,10 @@ What it does:
 - Runs AI agents whose answers cite their sources
 - Keeps a step trace of what every agent did
 - Escalates to a human when a task needs one
+- The agent's tools are an allowlist, and a step that would use something
+  outside it stops and says so
+- A knowledge base the agent quotes, so an answer can be checked against the
+  source it came from
 - Owners and admins can take a workspace JSON and a streamed run-audit CSV;
   signing secrets, API keys and invitation tokens stay behind
 
